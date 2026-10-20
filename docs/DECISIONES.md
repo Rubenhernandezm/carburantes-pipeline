@@ -27,7 +27,7 @@ Límite absoluto del proyecto: **3 € al año**. Coste esperado con este diseñ
 - [x] Presupuesto en **Cost Management** (`presupuesto-mensual-1usd`): **1 €/mes** (la suscripción factura en EUR), ámbito de suscripción, alertas al 25 %, 50 % y 100 % real y al 100 % previsto, a dos correos (el universitario y uno personal). Caduca el 31/12/2036. Se crea sin problemas en Azure for Students (D-010). **Pendiente de la fase 5:** comprobar que mide el consumo real.
 - [x] **Alerta de anomalías** de Cost Management: diaria por grupo de recursos, al correo personal, vigente hasta el **19/10/2027** (renovar, ver el plan de fin del crédito).
 - [x] **Políticas de Azure con efecto Deny:** `solo-spain-central` y `lista-roja-costes` (D-011).
-- [ ] Filtro en el correo para que `azure-noreply@microsoft.com` no vaya nunca a spam.
+- [x] Filtro en el correo para que `azure-noreply@microsoft.com` no vaya nunca a spam.
 - [ ] Cuando exista Synapse: **límites de datos procesados** (diario, semanal y mensual) al valor más bajo permitido.
 - [ ] Cuando exista Application Insights: **límite diario de ingesta**, muestreo y retención de 30 días.
 - [x] **No activar planes de Defender for Cloud** aunque el portal lo sugiera (verificado: "Azure Defender no está habilitado"). No pulsar "Actualizar cobertura". La política no lo cubre porque no es un recurso: es una regla manual.
