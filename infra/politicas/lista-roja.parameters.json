@@ -1,0 +1,24 @@
+{
+  "listOfResourceTypesNotAllowed": {
+    "value": [
+      "Microsoft.Compute/virtualMachines",
+      "Microsoft.Compute/virtualMachineScaleSets",
+      "Microsoft.Databricks/workspaces",
+      "Microsoft.DataFactory/factories",
+      "Microsoft.Synapse/workspaces/sqlPools",
+      "Microsoft.Synapse/workspaces/bigDataPools",
+      "Microsoft.Fabric/capacities",
+      "Microsoft.PowerBIDedicated/capacities",
+      "Microsoft.Network/natGateways",
+      "Microsoft.Network/privateEndpoints",
+      "Microsoft.Network/publicIPAddresses",
+      "Microsoft.Network/virtualNetworkGateways",
+      "Microsoft.Network/azureFirewalls",
+      "Microsoft.DocumentDB/databaseAccounts",
+      "Microsoft.KeyVault/managedHSMs"
+    ]
+  },
+  "effect": {
+    "value": "Deny"
+  }
+}

@@ -1,0 +1,90 @@
+# =========================================================
+# carburantes-pipeline
+# No se versionan: secretos, estado de Terraform, datos
+# ni nada que se pueda regenerar con un comando.
+# =========================================================
+
+# ---------- Secretos ----------
+# Variables de entorno locales. Se versiona solo la plantilla .env.example
+.env
+.env.*
+!.env.example
+# Certificados, claves privadas y perfiles de publicación de Azure
+*.pem
+*.key
+*.pfx
+*.PublishSettings
+# Entornos de Azure Developer CLI (guardan IDs de suscripción)
+.azure/
+
+# ---------- Python ----------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# ---------- Jupyter ----------
+.ipynb_checkpoints/
+
+# ---------- Azure Functions ----------
+# Configuración local de la Function: contiene cadenas de conexión
+local.settings.json
+.python_packages/
+# Emulador local de almacenamiento (Azurite)
+__azurite_db*__.json
+__blobstorage__/
+__queuestorage__/
+# Paquetes de despliegue
+*.zip
+
+# ---------- Terraform ----------
+.terraform/
+# El estado guarda en texto plano claves y cadenas de conexión
+*.tfstate
+*.tfstate.*
+# Los planes guardados también contienen valores sensibles
+*.tfplan
+# Variables (pueden llevar secretos). Se versiona terraform.tfvars.example
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+crash.log
+crash.*.log
+# OJO: .terraform.lock.hcl SÍ se versiona (fija versiones de proveedores)
+
+# ---------- dbt ----------
+target/
+dbt_packages/
+logs/
+# Credenciales de conexión: profiles.yml vive en ~/.dbt, nunca en el repo
+profiles.yml
+.user.yml
+
+# ---------- Datos ----------
+# Toda la carpeta de datos locales
+/data/
+# Formatos de datos que nunca son código, estén donde estén
+*.parquet
+*.duckdb
+*.duckdb.wal
+
+# ---------- Sistema y editores ----------
+Thumbs.db
+desktop.ini
+.DS_Store
+.idea/
+.vscode/
+*.log
