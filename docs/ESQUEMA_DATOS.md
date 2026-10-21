@@ -1,6 +1,6 @@
 # Estructura de los datos — Precios de carburantes (Ministerio)
 
-Resultado de la fase de exploración (19/10/2026). Describe la fuente, sus campos, los problemas de calidad detectados y la propuesta preliminar de modelo. La propuesta de modelo se cerrará en la fase de modelado con dbt.
+Resultado de la fase de exploración (19/10/2026), con las validaciones de la ingesta revisadas en la fase 4 (21/10/2026, D-014). Describe la fuente, sus campos, los problemas de calidad detectados y la propuesta preliminar de modelo. La propuesta de modelo se cerrará en la fase de modelado con dbt.
 
 ---
 
@@ -117,11 +117,20 @@ Media de **~3,7 carburantes por estación**. Las unidades de los gases (por litr
 | 7 | Nombres de provincia inconsistentes | Varias provincias | Usar `IDProvincia` como clave. |
 | 8 | Códigos con ceros a la izquierda | `C.P.`, `IDProvincia`, `IDCCAA` | Mantener como texto. |
 
-### Validaciones que hará la ingesta cada día
-- `ResultadoConsulta` = `OK`.
-- Número de estaciones dentro de un rango razonable (por ejemplo, ±10 % respecto al día anterior).
-- `IDEESS` sin duplicados.
-- Todos los precios convertibles a número y dentro de un rango razonable.
+### Validaciones (D-014)
+
+**En la ingesta, cada día**, en dos niveles:
+
+- **Bloqueantes:** no se guarda nada y la ejecución falla.
+  - La respuesta no es JSON.
+  - `ResultadoConsulta` es distinto de `OK`.
+  - Falta `ListaEESSPrecio` o está vacía.
+  - El número de estaciones está fuera de 10.000–13.000.
+- **Avisos:** se guarda el raw y se registra un warning.
+  - `IDEESS` duplicados.
+  - Precios no convertibles a número o fuera de un rango razonable.
+
+**En curated (fase 6):** conversión de precios (problema 1), tratamiento de `IDEESS` duplicados y comparación del número de estaciones con el día anterior (aviso si varía más de ±10 %).
 
 ---
 

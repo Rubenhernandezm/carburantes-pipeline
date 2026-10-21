@@ -27,7 +27,7 @@ Límite absoluto del proyecto: **3 € al año**. Coste esperado con este diseñ
 - [x] Presupuesto en **Cost Management** (`presupuesto-mensual-1usd`): **1 €/mes** (la suscripción factura en EUR), ámbito de suscripción, alertas al 25 %, 50 % y 100 % real y al 100 % previsto, a dos correos (el universitario y uno personal). Caduca el 31/12/2036. Se crea sin problemas en Azure for Students (D-010). **Pendiente de la fase 5:** comprobar que mide el consumo real.
 - [x] **Alerta de anomalías** de Cost Management: diaria por grupo de recursos, al correo personal, vigente hasta el **19/10/2027** (renovar, ver el plan de fin del crédito).
 - [x] **Políticas de Azure con efecto Deny:** `solo-spain-central` y `lista-roja-costes` (D-011).
-- [x] Filtro en el correo para que `azure-noreply@microsoft.com` no vaya nunca a spam.
+- [ ] Filtro en el correo para que `azure-noreply@microsoft.com` no vaya nunca a spam.
 - [ ] Cuando exista Synapse: **límites de datos procesados** (diario, semanal y mensual) al valor más bajo permitido.
 - [ ] Cuando exista Application Insights: **límite diario de ingesta**, muestreo y retención de 30 días.
 - [x] **No activar planes de Defender for Cloud** aunque el portal lo sugiera (verificado: "Azure Defender no está habilitado"). No pulsar "Actualizar cobertura". La política no lo cubre porque no es un recurso: es una regla manual.
@@ -241,6 +241,48 @@ Costes aproximados, para dar el orden de magnitud. La última columna indica si 
   - Ignorar por extensión (`*.json`, `*.csv`): excluiría los parámetros de las políticas y los seeds de dbt, que son código. Se ignora por ubicación (`/data/`) y solo por extensión los formatos que nunca son código.
   - Crear ya todas las carpetas con `.gitkeep`: el repositorio mostraría carpetas vacías durante meses.
 
+## D-013 · Paquete de ingesta: layout plano y dependencias separadas
+- **Contexto:** la ingesta se ejecutará en local, en la CI (fase 8) y en una Azure Function (fase 5). Hace falta poder testearla sin red y que el paquete de despliegue lleve solo lo imprescindible.
+- **Decisión:**
+  - Paquete `carburantes_ingesta/` con **layout plano** dentro de `ingesta/`, al lado de `function_app.py`.
+  - Un módulo por responsabilidad: `cliente.py` (descarga con el adaptador TLS de D-007), `validacion.py`, `almacenamiento.py`, `ingesta.py` (orquesta) y `__main__.py` (`python -m carburantes_ingesta`). `__main__.py` y `function_app.py` solo llaman a la misma función `ejecutar()`.
+  - **La lógica, separada de la entrada/salida:** la sesión HTTP, el destino y la fecha se pasan como parámetros, para poder sustituirlos en los tests.
+  - `ingesta/requirements.txt`: solo lo que necesita la Function, con versión exacta (`requests==2.34.2`). En la fase 5 se añadirán `azure-functions` y el SDK de almacenamiento.
+  - `ingesta/requirements-dev.txt`: `-r requirements.txt` más `pytest==9.1.1`.
+  - Las dependencias de exploración (pandas, JupyterLab) van en `notebooks/requirements.txt`, fuera de `ingesta/`.
+  - pytest se configura en `ingesta/pyproject.toml`. Los tests que llaman a la API real llevan el marcador `integracion` y no se ejecutan por defecto.
+- **Por qué:**
+  - La Function despliega la carpeta tal cual: con layout plano, `function_app.py` importa el paquete sin instalarlo, y la estructura es la misma en local y en producción.
+  - Una sola función `ejecutar()` para local, CI y Azure: lo que se prueba es lo que se ejecuta.
+  - Menos dependencias en la Function: paquete más pequeño y arranque más rápido. La CI de la ingesta instala solo lo suyo.
+  - Versiones exactas: el despliegue es reproducible.
+  - **Regla:** todo lo que se importa directamente va en el fichero, aunque ya llegue como dependencia de otro paquete.
+- **Alternativas descartadas:**
+  - Layout `src/`: es el estándar para librerías que se instalan con pip; aquí obligaría a instalar el paquete en la Function sin aportar nada.
+  - Un único `requirements.txt`, o generarlo con `pip freeze`: metería pandas, JupyterLab y sus dependencias en la Function.
+- **Lección:** `pytest` no añade la carpeta actual a `sys.path` y `python -m pytest` sí. Con layout plano hace falta `pythonpath = ["."]` en la configuración para que los dos funcionen igual, también desde la raíz del repositorio (`pytest ingesta`).
+
+## D-014 · Validaciones de la ingesta en dos niveles
+- **Contexto:** el esquema de datos preveía que la ingesta validara cada día todos los precios y comparara el número de estaciones con el día anterior (±10 %). Dos problemas: un solo precio erróneo entre ~42.000 haría perder el día entero, y comparar con el día anterior obliga a la ingesta a leer el fichero previo (a tener estado).
+- **Decisión:**
+  - **Bloqueantes:** no se guarda nada y la ejecución falla con un error propio (`RespuestaInvalida`).
+    - La respuesta no es JSON.
+    - `ResultadoConsulta` es distinto de `OK`.
+    - Falta `ListaEESSPrecio` o está vacía.
+    - El número de estaciones está fuera de **10.000–13.000**.
+  - **Avisos:** se guarda el raw y se registra un warning.
+    - `IDEESS` duplicados.
+    - Precios no convertibles o fuera de rango.
+  - Los precios y los duplicados se tratan en curated (fase 6). La comparación con el día anterior también se aplaza a la fase 6.
+- **Por qué:**
+  - Raw es la copia de lo que dijo la fuente y sirve para reprocesar. Una respuesta rota no sirve ni para eso; una con algún dato raro, sí.
+  - Si la ejecución falla solo cuando la respuesta no es utilizable, un fallo significa algo (alerta, reintento).
+  - El rango absoluto (~±12 % sobre las 11.433 estaciones del 19/10/2026) detecta respuestas truncadas sin que la ingesta tenga estado.
+- **Alternativas descartadas:**
+  - Validar todo y rechazar el día si algo falla: se perdería histórico por un solo dato.
+  - No validar: se guardarían respuestas de error o truncadas sin avisar.
+  - Comparar ya con el día anterior: añade estado a la ingesta cuando todavía no hay histórico.
+
 ---
 
 ## Plan de fin del crédito (segundo año)
@@ -283,16 +325,18 @@ Costes aproximados, para dar el orden de magnitud. La última columna indica si 
 | Si el servicio genera la foto en cada petición, y hora de ejecución diaria de la ingesta | 4 · Script de ingesta |
 | Si hay endpoint histórico por fecha para hacer backfill | 4 · Script de ingesta |
 | Nivel de precios: contrastar con una fuente independiente (Boletín Petrolero de la UE o prensa) | 4 · Script de ingesta |
-| Separar las dependencias de desarrollo (pandas, JupyterLab) de las de la Function (`ingesta/requirements.txt`, solo lo imprescindible) | 4 · Script de ingesta |
+| Mover las dependencias de exploración (pandas, JupyterLab) a `notebooks/requirements.txt` (D-013) | 4 · Script de ingesta |
+| Comprobar con un entorno virtual limpio que la ingesta funciona solo con `ingesta/requirements.txt` (D-013) | 4 · Script de ingesta |
 | Memoria mínima de instancia de Flex Consumption (afecta al coste). Python 3.13 ya confirmado en Spain Central (D-009) | 5 · Infraestructura con Terraform |
 | Medir la primera semana el coste real de la cuenta de almacenamiento interna de la Function; si es alto, aplicar el plan B (GitHub Actions) | 5 · Infraestructura con Terraform |
 | **Comprobar que Cost Management mide el consumo real** (comparar Análisis de costes con Education Hub la primera semana) y que llegan los correos de alerta (D-010) | 5 · Infraestructura con Terraform |
 | Iniciar sesión con MFA en la CLI antes de `terraform apply` (ver D-011, lecciones) | 5 · Infraestructura con Terraform |
 | Pasar las dos políticas a Terraform (importar las asignaciones existentes o recrearlas con nombre legible) y comprobar que rechazan un recurso fuera de la región o de la lista roja | 5 · Infraestructura con Terraform |
 | **Dónde guardar el estado de Terraform:** en local o en un backend remoto en Azure Storage (coste y protección del fichero). Nunca en el repositorio (D-012) | 5 · Infraestructura con Terraform |
-| Añadir `.funcignore` para que los tests y ficheros de desarrollo no entren en el paquete de la Function | 5 · Infraestructura con Terraform |
+| Añadir `.funcignore` para que `tests/`, `pyproject.toml` y `requirements-dev.txt` no entren en el paquete de la Function (D-013) | 5 · Infraestructura con Terraform |
 | **Capa de consulta:** Synapse serverless sobre Parquet o Azure SQL Database con oferta gratuita (ambas disponibles en Spain Central; comprobar compatibilidad con la suscripción de estudiante y el consumo de vCore-segundos) | 6 · Zona curated |
 | Si se elige Synapse: límites mínimos permitidos en su control de costes, y comprobar que el bloqueo de `Microsoft.Synapse/workspaces/sqlPools` no impide crear el workspace serverless | 6 · Zona curated |
+| Validación de precios, tratamiento de `IDEESS` duplicados y comparación del número de estaciones con el día anterior (D-014) | 6 · Zona curated |
 | Adaptador de dbt según la capa elegida: `dbt-sqlserver` (Azure SQL), `dbt-synapse` (comprobar soporte de serverless) o `dbt-duckdb` sobre los Parquet de ADLS | 7 · Modelado con dbt |
 | Significado exacto de `Remisión` (OM / dm): confirmar en la documentación del Geoportal | 7 · Modelado con dbt |
 | Reglas concretas de clasificación de rótulos y lista de marcas | 7 · Modelado con dbt |
