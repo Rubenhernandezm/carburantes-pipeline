@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "integracion: llama a la API real del Ministerio (requiere red; no se ejecuta por defecto)",
+]
+addopts = "--strict-markers -m 'not integracion'"
