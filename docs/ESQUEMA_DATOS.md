@@ -11,7 +11,7 @@ Resultado de la fase de exploración (19/10/2026), con las validaciones de la in
 | Servicio | Servicio REST de precios de carburantes (Ministerio para la Transición Ecológica / Geoportal de gasolineras) |
 | Endpoint | `https://sedeaplicaciones.minetur.gob.es/ServiciosRESTCarburantes/PreciosCarburantes/EstacionesTerrestres/` |
 | Autenticación | Ninguna (datos públicos) |
-| Formato | JSON con la cabecera `Accept: application/json`; sin ella devuelve XML |
+| Formato | JSON con la cabecera `Accept: application/json`; sin ella devuelve XML, con los nombres de campo codificados (`_x0025__x0020_BioEtanol` = `% BioEtanol`) |
 | Conexión | Requiere TLS 1.2 con cifrados RSA (ver D-007) |
 | Tamaño | ~14 MB por respuesta, en una sola línea |
 | Volumen | 11.433 estaciones, 41 campos por estación |
@@ -112,8 +112,8 @@ Media de **~3,7 carburantes por estación**. Las unidades de los gases (por litr
 | 2 | Ausentes como `""` en lugar de nulo | Todos los campos | Convertir a nulo. |
 | 3 | Coordenadas `(0, 0)` | 4 estaciones | Nulo + flag `coord_ausente` (D-008). |
 | 4 | Latitud y longitud intercambiadas | 1 estación (Tui) | Corregir + flag `coord_corregida` (D-008). |
-| 5 | `Rótulo` en texto libre | 3.565 valores distintos | Clasificar rótulo → marca → grupo → tipo de operador con reglas de palabra completa y una tabla de correspondencias (seed de dbt). Medir cobertura. |
-| 6 | Cambio de marca en curso (CEPSA → MOEVE) | Cientos de estaciones | Dimensión de estaciones SCD tipo 2. |
+| 5 | `Rótulo` en texto libre | 3.565 valores distintos | Los 30 más frecuentes (~7.000 estaciones) están limpios; en la cola hay marca + nombre de estación (`BP HOSTAL DE LA SELVA`, `GALP/3CAMINOS-VALENCIA`), razones sociales (`COMBUSTIBLES CALAHORRA S.L.`), cooperativas y low-cost. Clasificar rótulo → marca → grupo → tipo de operador (gran petrolera / low-cost / hipermercado / independiente) con reglas de palabra completa y una tabla de correspondencias (seed de dbt). Medir cobertura. |
+| 6 | Cambio de marca en curso (CEPSA → MOEVE) | Cientos de estaciones | Dimensión de estaciones SCD tipo 2. Ojo: marca ≠ grupo (CAMPSA y PETRONOR son de Repsol). |
 | 7 | Nombres de provincia inconsistentes | Varias provincias | Usar `IDProvincia` como clave. |
 | 8 | Códigos con ceros a la izquierda | `C.P.`, `IDProvincia`, `IDCCAA` | Mantener como texto. |
 
@@ -136,8 +136,8 @@ Media de **~3,7 carburantes por estación**. Las unidades de los gases (por litr
 
 ## 4. Hallazgos para el análisis
 
-- **Fiscalidad territorial:** Melilla, Las Palmas, Ceuta y Santa Cruz de Tenerife son las zonas más baratas (10–25 cts/l menos que la península). Hace falta una **zona fiscal**: península y Baleares / Canarias / Ceuta y Melilla.
-- **Gasóleo A (19/10/2026):** de 1,499 a 2,299 €/l, media 1,888 €/l. Nivel pendiente de contrastar con una fuente externa.
+- **Fiscalidad territorial:** Melilla, Las Palmas, Ceuta y Santa Cruz de Tenerife son las zonas más baratas (10–25 cts/l menos que la península), pero solo suman ~515 estaciones. Hace falta una **zona fiscal**: península y Baleares / Canarias / Ceuta y Melilla.
+- **Gasóleo A (19/10/2026):** 11.222 precios, de 1,499 a 2,299 €/l, media 1,888 €/l, sin valores absurdos. Nivel pendiente de contrastar con una fuente externa.
 - **Dispersión dentro de la península:** la fiscalidad no la explica por sí sola. Hipótesis: low-cost frente a grandes marcas.
 
 ---

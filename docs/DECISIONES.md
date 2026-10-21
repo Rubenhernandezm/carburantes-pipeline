@@ -1,344 +1,271 @@
-# Registro de decisiones — Pipeline de precios de carburantes en Azure
+# Decisiones del proyecto
 
-Este documento recoge las decisiones técnicas del proyecto: qué se decidió, por qué y qué alternativas se descartaron.
-
-Formato de cada decisión:
-- **Contexto:** qué problema había.
-- **Decisión:** qué se eligió.
-- **Por qué:** los motivos, con números cuando los hay.
-- **Alternativas descartadas:** y por qué no.
-
----
-
-## Reglas de coste (se revisan antes de crear cualquier recurso)
-
-Límite absoluto del proyecto: **3 € al año**. Coste esperado con este diseño: **~1–3 €/año**. Si una decisión técnica choca con el límite, gana el coste.
-
-**Primer año:** suscripción **Azure for Students**, **sin tarjeta**. El portal muestra **88 $ de crédito** (la documentación de Microsoft habla de 100 $), que **caducan el 18/11/2027**. Si el crédito se agotara o caducara, la suscripción se desactiva en lugar de cobrar, así que el coste real del primer año es **0 €**. Aun así, se vigila como si fuera dinero propio, porque con pago por uso los mismos errores sí costarían.
-
-**Defensa en profundidad (D-010):** prevenir (políticas, D-011) → limitar (crédito sin tarjeta, límites por servicio, formatos baratos) → detectar (presupuesto, anomalías, revisión semanal).
-
-### Protecciones (día 1, antes de crear nada)
-- [x] **Nunca añadir una tarjeta a la suscripción de estudiante.** Es lo que quita el límite de gasto. No pulsar nunca "Actualizar ahora", "Upgrade" ni "Quitar límite de gasto".
-- [x] Suscripción **Azure for Students** activa, sin tarjeta. Crédito: 88 $. Caduca: **18/11/2027**.
-- [x] MFA en la cuenta (Authenticator y un método de respaldo). Para **crear, modificar o borrar** desde la CLI o Terraform, la sesión tiene que haberse iniciado con MFA (ver D-011, lecciones).
-- [x] **Una sola región: Spain Central**, impuesta por la política `solo-spain-central` (D-009, D-011).
-- [ ] **Un único grupo de recursos** para todo el proyecto. Lo crea Terraform en la fase 5.
-- [x] Presupuesto en **Cost Management** (`presupuesto-mensual-1usd`): **1 €/mes** (la suscripción factura en EUR), ámbito de suscripción, alertas al 25 %, 50 % y 100 % real y al 100 % previsto, a dos correos (el universitario y uno personal). Caduca el 31/12/2036. Se crea sin problemas en Azure for Students (D-010). **Pendiente de la fase 5:** comprobar que mide el consumo real.
-- [x] **Alerta de anomalías** de Cost Management: diaria por grupo de recursos, al correo personal, vigente hasta el **19/10/2027** (renovar, ver el plan de fin del crédito).
-- [x] **Políticas de Azure con efecto Deny:** `solo-spain-central` y `lista-roja-costes` (D-011).
-- [ ] Filtro en el correo para que `azure-noreply@microsoft.com` no vaya nunca a spam.
-- [ ] Cuando exista Synapse: **límites de datos procesados** (diario, semanal y mensual) al valor más bajo permitido.
-- [ ] Cuando exista Application Insights: **límite diario de ingesta**, muestreo y retención de 30 días.
-- [x] **No activar planes de Defender for Cloud** aunque el portal lo sugiera (verificado: "Azure Defender no está habilitado"). No pulsar "Actualizar cobertura". La política no lo cubre porque no es un recurso: es una regla manual.
-- [ ] Revisión semanal del crédito restante (Education Hub) y del análisis de costes.
-
-### Lista roja: nunca sin justificarlo antes
-Costes aproximados, para dar el orden de magnitud. La última columna indica si la política `lista-roja-costes` (D-011) lo impide automáticamente.
-
-| Recurso / práctica | Por qué es peligroso | Coste aproximado | ¿Bloqueado por política? |
-|---|---|---|---|
-| Microsoft Fabric (capacidad F) / Power BI Premium / Power BI Embedded | Se cobra la capacidad por hora, se use o no | Cientos de €/mes | Sí (Fabric y Embedded) |
-| Synapse **dedicated** SQL pool o **Spark** pools | Cobran por hora de cómputo | Desde ~1 €/hora | Sí |
-| Azure Databricks | Cómputo (DBU) + máquinas virtuales | Decenas de €/mes | Sí |
-| Data Factory: actividades de copia y data flows | Se cobra por DIU-hora con mínimo por ejecución | Una copia diaria ya supera el límite anual | Sí (todo Data Factory) |
-| Functions **Premium** o **App Service plan** | Coste fijo mensual aunque no se ejecute nada | Decenas de €/mes | **No**: Flex Consumption usa el mismo tipo de recurso. Se vigila en el `plan` de Terraform |
-| Private Endpoints, NAT Gateway, VPN, Azure Firewall | Cobran por hora | ~7 €/mes por endpoint; NAT ~30 €/mes | Sí |
-| Consultar con Synapse serverless JSON sin comprimir ni particionar | Se cobra por datos procesados | Hasta 100× más que Parquet | No (es coste por uso): se evita con el diseño (D-004) y los límites de Synapse |
-| Defender for Cloud (Storage, etc.) | Se cobra por recurso y mes | ~10 €/mes por cuenta de almacenamiento | No (es una configuración): regla manual |
-| Application Insights sin límite diario | Se cobra la ingesta por encima de la cuota gratuita | Variable, puede dispararse | No: límite diario en Terraform (fase 5) |
-| Almacenamiento GRS / RA-GRS, nivel Premium, versionado sin reglas de limpieza | Multiplica el coste sin aportar nada aquí | Poco, pero innecesario | No: se fija LRS/Hot en Terraform |
-| Claves gestionadas por el cliente (Key Vault HSM) | Coste fijo por clave | ~1 €/mes o más | Sí (Managed HSM) |
-| Máquinas virtuales, IP públicas, Cosmos DB | Coste fijo por hora | Decenas de €/mes | Sí |
-| Azure SQL aprovisionado (no la oferta gratuita) | Coste fijo por hora | Decenas de €/mes | No: la opción B de la fase 6 usa el mismo tipo de recurso |
-
-### Lista verde: lo que se usa y por qué es barato
-| Servicio | Uso | Coste anual estimado |
-|---|---|---|
-| Azure Functions (**Flex Consumption**, Python 3.13, disparador temporizado) | 1 ejecución diaria de ~20 s | < 0,50 € |
-| Cuenta de almacenamiento interna de la Function | Estado y despliegue de la Function | Céntimos, **a medir la primera semana** |
-| ADLS Gen2 (nivel Hot, redundancia LRS) | ~1–1,5 GB al cabo de un año | ~0,30 € |
-| Capa de consulta, opción A: Synapse **serverless** SQL sobre Parquet particionado | Consultas de desarrollo, dbt y Power BI | ~0,50–1 € |
-| Capa de consulta, opción B: **Azure SQL Database, oferta gratuita** (100.000 vCore-s y 32 GB al mes) con pausa automática al llegar al límite | Datos modelados, dbt y Power BI en modo Import | 0 € |
-| Application Insights / Log Analytics con límite diario | Logs de la Function | 0 € (dentro de la cuota gratuita) |
-| Identidad administrada (Managed Identity) | Acceso de la Function al data lake sin claves | 0 € |
-| Cost Management (presupuestos, alertas, anomalías) y Azure Policy | Control de costes | 0 € |
-| Power BI Desktop | Visualización (aplicación local, no es un recurso de Azure) | 0 € |
+Registro de las decisiones técnicas del pipeline en formato ADR (Architecture Decision Record): qué problema había, qué decidí, qué descarté y qué consecuencias tiene. Las reglas de coste están en [COSTES.md](COSTES.md) y la descripción de los datos en [ESQUEMA_DATOS.md](ESQUEMA_DATOS.md).
 
 ---
 
 ## D-001 · Fuente de datos: precios de carburantes del Ministerio
-- **Contexto:** hacía falta un dataset real, público, que se actualice solo y que no esté sobreexplotado en portfolios.
-- **Decisión:** servicio REST de precios de carburantes de las gasolineras de España (Ministerio para la Transición Ecológica / Geoportal de gasolineras).
-- **Por qué:** se actualiza a diario, es gratuito y sin clave de API, cubre ~11.400 estaciones y permite construir un histórico propio. Además conecta con un proyecto anterior de costes de flota.
-- **Alternativas descartadas:** datasets estáticos de Kaggle o el de taxis de Nueva York (no se actualizan y están muy vistos).
 
-## D-002 · Cloud: Azure (revisada: inicialmente AWS)
-- **Contexto:** el proyecto se planteó primero en AWS, pero antes de crear ninguna infraestructura se reconsideró la elección.
-- **Decisión:** Azure, con una suscripción **Azure for Students**.
-- **Por qué:**
-  - **Riesgo de factura nulo el primer año:** crédito de 88 $ (caduca el 18/11/2027) sin tarjeta; si se agotara, la suscripción se desactiva en lugar de cobrar.
-  - **Muy presente en las ofertas de datos en España**, sobre todo en grandes empresas y consultoras.
-  - **Coherencia con el ecosistema Microsoft** (SQL Server, Power BI).
-  - **No se pierde trabajo:** la exploración de los datos no depende de la nube.
-- **Alternativas descartadas:**
-  - AWS: su plan gratuito cierra la cuenta a los 6 meses (con pérdida de los datos) y el plan de pago requiere tarjeta.
-  - GCP: menos presente en las ofertas del mercado objetivo.
-- **Limitaciones:**
-  - El crédito caduca y solo se renueva mientras se mantenga la condición de estudiante. Ver el **plan de fin del crédito**, más abajo.
-  - La suscripción depende de la cuenta universitaria. En el peor caso, el proyecto queda en el repositorio y se puede recrear con Terraform en otra suscripción.
+Estado: aceptada
 
-## D-003 · Arquitectura serverless en lugar de un servidor
-- **Contexto:** el pipeline se ejecuta una vez al día unos segundos.
-- **Decisión:** Azure Function con disparador temporizado (Python, plan **Flex Consumption**) → ADLS Gen2 (raw y curated) → capa de consulta SQL → dbt → Power BI. La capa de consulta (Synapse serverless o Azure SQL Database con oferta gratuita) se decide en la fase 6; las dos cuestan prácticamente cero.
-- **Por qué:** con serverless solo se paga lo que se ejecuta. Coste estimado ~1–3 €/año frente a ~50–60 €/año de un VPS con cron y Postgres, que cobra 24 h al día aunque esté parado. Se elige **Flex Consumption** porque el plan Consumption en Linux (necesario para Python) se retira en septiembre de 2028 y Microsoft recomienda Flex para aplicaciones nuevas. **Confirmado en Spain Central:** Flex Consumption admite Python 3.10–3.14; se usa **3.13** (la misma versión que en local, con soporte hasta el 31/10/2029).
-- **Alternativas descartadas:**
-  - VPS o máquina virtual con cron: más caro a este volumen y hay que mantener el servidor.
-  - Data Factory para la ingesta: sus actividades de copia cobran por ejecución con un mínimo que, a diario, supera el límite anual.
-- **Plan B:** si la cuenta de almacenamiento interna de la Function resultara cara, la ingesta puede ejecutarse como workflow programado de GitHub Actions (gratuito en repos públicos) escribiendo en ADLS.
-- **Cuándo cambiaría la decisión:** con mucho volumen o carga constante, un servidor o un warehouse dedicado puede salir más a cuenta.
+### Contexto
+Quería un dataset real, público y que se actualizara solo, para que tuviera sentido construir un pipeline. Los típicos de portfolio (Kaggle, taxis de Nueva York) son estáticos y están muy vistos.
 
-### Equivalencias AWS ↔ Azure
-| Función | AWS | Azure |
-|---|---|---|
-| Cómputo serverless | Lambda | Azure Functions |
-| Programación | EventBridge Scheduler | Disparador temporizado de la Function |
-| Data lake | S3 | ADLS Gen2 |
-| Consultas SQL sobre ficheros | Athena + Glue Data Catalog | Synapse serverless SQL |
-| Base de datos SQL serverless | Aurora Serverless | Azure SQL Database serverless |
-| Identidad y permisos | IAM roles | Entra ID + RBAC + identidad administrada |
-| Logs y monitorización | CloudWatch | Application Insights / Azure Monitor |
-| Control de costes | AWS Budgets / Cost Anomaly Detection | Cost Management (presupuestos y alertas de anomalías) |
-| Reglas preventivas sobre lo que se puede crear | Service Control Policies (SCP) | Azure Policy |
+### Decisión
+Uso el servicio REST de precios de carburantes del Ministerio para la Transición Ecológica. Se actualiza a diario, es gratuito, no necesita clave y cubre unas 11.400 gasolineras. Además enlaza con un proyecto anterior mío de costes de flota.
 
-## D-004 · Formatos: JSON crudo comprimido + Parquet particionado en formato largo
-- **Contexto:** el JSON de un día ocupa ~14 MB, y la mayoría de los 23 campos de precio vienen vacíos. Synapse serverless cobra por datos procesados.
-- **Decisión:**
-  - Contenedor **raw** en ADLS: el JSON tal cual llega, comprimido con gzip (~1–2 MB/día). Es la copia de seguridad para poder reprocesar.
-  - Contenedor **curated**: Parquet en formato largo (una fila por estación, carburante y día; ~42.000 filas/día, ~0,3–0,5 MB), particionado por fecha.
-- **Por qué:** pasar de ~14 MB a <0,5 MB por día. Consultar Parquet particionado cuesta del orden de **100 veces menos** que consultar el JSON sin comprimir. El formato largo elimina los cientos de miles de campos vacíos.
-- **Alternativas descartadas:** guardar solo el JSON (caro de consultar); formato ancho con 23 columnas de precio (casi todas nulas).
+### Alternativas descartadas
+- Datasets estáticos de Kaggle o el de taxis de Nueva York: no se actualizan, así que no hay histórico que construir.
 
-## D-005 · Esquemas como código, sin servicios de cómputo por hora
-- **Contexto:** sea cual sea la capa de consulta, hay que describir las tablas: vistas o tablas externas sobre los Parquet si es Synapse serverless, o tablas y vistas si es Azure SQL Database.
-- **Decisión:** definir esquemas, tablas y vistas en **SQL versionado en el repositorio** (más adelante, generado con dbt). La infraestructura, con Terraform. Sin Data Factory, sin Spark pools y sin servicios de catalogación de pago.
-- **Por qué:** el esquema es conocido y estable; definirlo en código es gratis, reproducible y queda versionado. Los servicios que descubren esquemas o transforman con clústeres cobran por hora.
-- **Alternativas descartadas:** Spark pools de Synapse o Data Factory para transformar y catalogar (coste por hora, incompatible con el límite).
+### Consecuencias
+El valor del proyecto está en el histórico que voy acumulando. Si la ingesta falla un día, ese día se pierde, salvo que el servicio tenga un endpoint histórico (pendiente de comprobar).
 
-## D-006 · Metodología: explorar los datos en local antes de tocar la nube
-- **Contexto:** sin conocer el dato, cualquier diseño de esquema o estimación de coste es inventada.
-- **Decisión:** primero se descarga y explora el JSON en local con Python; después se crea la infraestructura.
-- **Por qué:** coste cero, y permite detectar problemas de calidad antes de construir la tubería. Además, resultó independiente de la nube: el cambio de AWS a Azure no invalidó nada de la exploración.
+---
 
-## D-007 · Conexión TLS adaptada al servidor del Ministerio
-- **Contexto:** Python no podía descargar los datos: el servidor cortaba la conexión durante el saludo TLS (`ConnectionResetError 10054`), mientras que el navegador y el curl de Windows sí funcionaban.
-- **Diagnóstico:** se descartó la red (el navegador funcionaba), la cabecera `User-Agent` (no cambiaba nada) y la versión de TLS (TLS 1.2 con cifrados por defecto también fallaba). Probando una variable cada vez, se vio que el servidor **solo acepta cifrados con intercambio de claves RSA**, que Python no ofrece por defecto por carecer de *forward secrecy*.
-- **Decisión:** un adaptador de `requests` montado **solo para ese servidor**, con TLS 1.2 y una lista explícita de cifrados: primero los modernos (ECDHE) y después los RSA que acepta el servidor. La verificación del certificado se mantiene.
-- **Por qué es aceptable:** los datos son públicos y no viajan credenciales; el certificado sigue verificándose, así que la autenticidad e integridad están garantizadas; el cambio no afecta a ninguna otra conexión; y si el servidor se actualiza, se usarán automáticamente los cifrados modernos.
-- **Alternativas descartadas:**
-  - `verify=False`: desactiva la verificación del certificado; inaceptable.
-  - `SECLEVEL=1`: también funcionaba, pero relaja más cosas de las necesarias.
-  - Descargar con curl en lugar de Python: la ingesta irá en una Azure Function con Python, así que tiene que funcionar en Python.
+## D-002 · Nube: Azure
 
-## D-008 · Tratamiento de coordenadas erróneas
-- **Contexto:** al validar las coordenadas contra los rangos geográficos de España, 27 estaciones quedaban fuera. Al revisarlas: 22 eran de Ceuta y Melilla (válidas, faltaba su rango), 4 tenían `(0, 0)` y 1 (Tui, Pontevedra) tenía latitud y longitud intercambiadas.
-- **Decisión:**
-  - Tres rangos válidos: península y Baleares (lat 36–44, lon -9,5–4,5), Canarias (lat 27,5–29,5, lon -18,5–-13), Ceuta y Melilla (lat 35–36, lon -5,5–-2,8).
-  - `(0, 0)` → nulo + flag `coord_ausente`.
-  - Fuera de rango que, al intercambiar latitud y longitud, cae en rango → se corrige + flag `coord_corregida`.
-  - Resto fuera de rango → nulo + flag `coord_invalida`.
-  - El dato original se conserva siempre en raw; la estación y sus precios nunca se descartan.
-- **Por qué:** los errores son pocos (5 de 11.433, un 0,04 %) pero rompen mapas y cálculos de distancia. Corregir solo cuando la corrección es inequívoca, y marcar siempre lo que se ha tocado, mantiene el dato auditable.
-- **Alternativas descartadas:**
-  - Borrar las estaciones afectadas: se perderían sus precios, que son correctos.
-  - Dejar los `(0, 0)`: aparecerían en el océano frente a África y distorsionarían cualquier cálculo geográfico.
-  - Intentar geocodificar la dirección: añade dependencia externa y coste para 4 casos.
-- **Lección:** `count` decía que no faltaba ninguna coordenada, pero 4 venían como `(0, 0)`. **Un valor ausente puede llegar disfrazado de cero.**
+Estado: aceptada
+
+### Contexto
+Necesitaba una nube en la que montar el pipeline sin riesgo de factura y que me sirviera para el mercado laboral al que apunto.
+
+### Decisión
+Lo hago en Azure con una suscripción Azure for Students. Tiene 88 $ de crédito sin tarjeta hasta el 18/11/2027 y, si se acaba, la suscripción se desactiva en lugar de cobrar, así que el primer año no puedo tener factura. Además, Azure aparece mucho en las ofertas de datos en España y encaja con SQL Server y Power BI.
+
+### Alternativas descartadas
+- AWS: el plan gratuito cierra la cuenta a los 6 meses, con los datos dentro, y el de pago pide tarjeta.
+- GCP: aparece menos en las ofertas que me interesan.
+
+### Consecuencias
+El crédito caduca y solo se renueva mientras sea estudiante, y la suscripción depende de mi cuenta de la universidad. Por eso toda la infraestructura irá en Terraform: así puedo recrearla en otra suscripción en minutos.
+
+---
+
+## D-003 · Serverless en lugar de un servidor
+
+Estado: aceptada
+
+### Contexto
+El pipeline se ejecuta una vez al día durante unos segundos.
+
+### Decisión
+Una Azure Function con disparador temporizado (Python 3.13, plan Flex Consumption) que escribe en ADLS Gen2. Encima va una capa de consulta SQL que decidiré en la fase 6, dbt y Power BI. Con serverless solo pago lo que se ejecuta: calculo 1–3 € al año, frente a 50–60 € de un VPS encendido todo el día. Elijo Flex Consumption porque el plan Consumption de Linux se retira en septiembre de 2028 y Microsoft recomienda Flex para aplicaciones nuevas. Comprobé que en Spain Central admite Python 3.13, la misma versión que uso en local.
+
+### Alternativas descartadas
+- VPS o máquina virtual con cron: más caro a este volumen, y hay que mantener el servidor.
+- Data Factory para la ingesta: sus copias tienen un coste mínimo por ejecución que, a diario, supera mi límite anual.
+
+### Consecuencias
+Si la cuenta de almacenamiento interna de la Function saliera cara, tengo un plan B: ejecutar la ingesta como workflow programado de GitHub Actions. Con mucho volumen o carga constante, un servidor podría salir más a cuenta.
+
+---
+
+## D-004 · JSON crudo comprimido y Parquet particionado
+
+Estado: aceptada
+
+### Contexto
+El JSON de un día ocupa unos 14 MB y la mayoría de los 23 campos de precio vienen vacíos. Synapse serverless cobra por datos leídos.
+
+### Decisión
+Guardo dos copias. En raw, el JSON tal cual llega, comprimido con gzip (1–2 MB al día): es la copia de seguridad para poder reprocesar. En curated, Parquet en formato largo (una fila por estación, carburante y día: unas 42.000 filas y menos de 0,5 MB al día), particionado por fecha. Consultar Parquet particionado cuesta del orden de 100 veces menos que consultar el JSON.
+
+### Alternativas descartadas
+- Guardar solo el JSON: caro de consultar.
+- Parquet en formato ancho, con una columna por carburante: casi todas las celdas serían nulas.
+
+### Consecuencias
+La transformación de raw a curated es un paso más que mantener, pero puedo rehacer curated desde raw siempre que quiera.
+
+---
+
+## D-005 · Esquemas como código
+
+Estado: aceptada
+
+### Contexto
+Sea cual sea la capa de consulta, hay que definir las tablas y vistas sobre los datos.
+
+### Decisión
+Las defino en SQL versionado en el repositorio (más adelante, con dbt), y la infraestructura con Terraform. Conozco el esquema y es estable, así que declararlo en código es gratis, reproducible y queda en el historial.
+
+### Alternativas descartadas
+- Spark pools de Synapse o Data Factory para transformar y catalogar: cobran por hora.
+
+### Consecuencias
+Si la fuente cambia un campo, tengo que actualizar el esquema yo; no hay nada que lo descubra solo.
+
+---
+
+## D-006 · Explorar los datos en local antes de tocar la nube
+
+Estado: aceptada
+
+### Contexto
+Sin conocer el dato, cualquier diseño de esquema o estimación de coste habría sido inventada.
+
+### Decisión
+Primero descargué y exploré el JSON en local con Python y JupyterLab; la infraestructura viene después. No cuesta nada y me permitió encontrar los problemas de calidad antes de construir la tubería.
+
+### Alternativas descartadas
+- Diseñar el pipeline primero e ir descubriendo los datos sobre la marcha.
+
+### Consecuencias
+La exploración no depende de la nube, así que sigue valiendo aunque cambie la infraestructura. Lo que encontré está en ESQUEMA_DATOS.md.
+
+---
+
+## D-007 · Conexión TLS con el servidor del Ministerio
+
+Estado: aceptada
+
+### Contexto
+Python no podía descargar los datos: el servidor cortaba la conexión en el handshake TLS. El navegador y curl sí funcionaban.
+
+### Decisión
+Probé cambiando una cosa cada vez (red, User-Agent, versión de TLS) y vi que el servidor solo acepta cifrados RSA, que Python no ofrece por defecto. Monté un adaptador de requests solo para ese host, con TLS 1.2, los cifrados modernos primero y los RSA después. La verificación del certificado sigue activa.
+
+### Alternativas descartadas
+- verify=False: quita la verificación del certificado.
+- SECLEVEL=1: funcionaba, pero relaja más de lo necesario.
+- Descargar con curl: la ingesta va en una Function de Python, así que tiene que funcionar en Python.
+
+### Consecuencias
+Los datos son públicos y no viajan credenciales, así que el riesgo es bajo. El cambio no afecta a ninguna otra conexión, y si el servidor se actualiza se usarán los cifrados modernos sin tocar nada.
+
+---
+
+## D-008 · Coordenadas erróneas
+
+Estado: aceptada
+
+### Contexto
+Al validar las coordenadas contra los rangos de España, 27 estaciones quedaban fuera. 22 eran de Ceuta y Melilla (válidas: me faltaba su rango), 4 tenían (0, 0) y una, en Tui, tenía la latitud y la longitud intercambiadas.
+
+### Decisión
+Uso tres rangos válidos: península y Baleares (lat 36 a 44, lon −9,5 a 4,5), Canarias (lat 27,5 a 29,5, lon −18,5 a −13) y Ceuta y Melilla (lat 35 a 36, lon −5,5 a −2,8). Los (0, 0) pasan a nulo con el flag coord_ausente. Si al intercambiar latitud y longitud la estación cae en rango, la corrijo y la marco con coord_corregida. El resto de casos fuera de rango pasan a nulo con coord_invalida. Nunca borro estaciones, y el dato original queda siempre en raw.
+
+### Alternativas descartadas
+- Borrar las estaciones afectadas: perdería sus precios, que son correctos.
+- Dejar los (0, 0): aparecerían en el mar frente a África.
+- Geocodificar la dirección: dependencia externa y coste para 4 casos.
+
+### Consecuencias
+Solo corrijo lo inequívoco y todo lo tocado queda marcado, así que el dato sigue siendo auditable. La lección: count decía que no faltaba ninguna coordenada, pero cuatro venían como (0, 0). Un valor ausente puede llegar disfrazado de cero.
+
+---
 
 ## D-009 · Región: Spain Central
-- **Contexto:** había que fijar una única región para todo el proyecto. Las candidatas iniciales eran Spain Central, West Europe y North Europe. Al activar la suscripción se descubrió que Azure for Students trae una política de Microsoft (`sys.regionrestriction`, "Allowed resource deployment regions") que solo permite 5 regiones, distintas para cada estudiante. En esta suscripción: `germanywestcentral`, `norwayeast`, `spaincentral`, `italynorth` y `switzerlandnorth`. **West Europe y North Europe no están permitidas.**
-- **Decisión:** **Spain Central** (`spaincentral`). Alternativa si algún servicio fallara: **Germany West Central**.
-- **Por qué:**
-  - **Permitida** por la política de la suscripción.
-  - **Tiene todas las piezas críticas**, comprobado con la CLI: Flex Consumption con Python 3.10–3.14 (`az functionapp list-flexconsumption-locations` y `list-flexconsumption-runtimes`), workspaces de Synapse (`az provider show --namespace Microsoft.Synapse`) y Azure SQL. Las dos opciones de la fase 6 siguen abiertas.
-  - **Cercanía:** los datos y su fuente son españoles. Para una ingesta diaria la latencia no importa, pero es la elección natural.
-  - **El precio no discrimina:** con ~1,5 GB, la diferencia entre regiones es de céntimos al año.
-- **Alternativas descartadas:**
-  - West Europe y North Europe: no permitidas en la suscripción de estudiante.
-  - Germany West Central: tiene los mismos servicios, pero no aporta nada frente a Spain Central. Queda como plan B.
-  - Norway East, Italy North, Switzerland North: sin ventajas.
-- **Cómo se garantiza:** con la política `solo-spain-central` (D-011), que reduce las 5 regiones permitidas a 1.
 
-## D-010 · Control de costes en Azure for Students: comprobar en lugar de suponer, y por capas
-- **Contexto:** la documentación de Cost Management incluye Azure for Students (`MS-AZR-0170P`) en la tabla de ofertas **no soportadas**, y un moderador de Microsoft lo confirmó en 2020 y en 2023. Pero la página de Education Hub recomienda crear presupuestos. La información se contradecía, y el presupuesto era una de las protecciones del día 1.
-- **Decisión:**
-  1. **Comprobarlo en la práctica** antes de fiarse de cualquiera de las dos fuentes.
-  2. **No depender de una sola protección:** montar la protección en tres capas.
-     - **Prevenir:** políticas que impiden crear recursos caros o fuera de la región (D-011).
-     - **Limitar:** el crédito sin tarjeta como tope duro, límites por servicio (App Insights, Synapse) y formatos baratos (D-004).
-     - **Detectar:** presupuesto de 1 €/mes, alerta de anomalías y revisión semanal del crédito en Education Hub.
-- **Resultado de la comprobación (20/10/2026):**
-  - El presupuesto se crea sin errores, con sus 4 alertas y dos destinatarios.
-  - Análisis de costes abre las vistas ("No se ha notificado ningún costo durante este período") sin ningún aviso de oferta no soportada, y el panel de velocidad de gasto de la suscripción muestra 0,00.
-  - La regla de anomalías se crea sin errores.
-  - **Queda por comprobar en la fase 5:** que mide el consumo real y que los correos llegan. Hasta que haya recursos no hay consumo con el que probarlo.
-- **Detalles de configuración:**
-  - **Ámbito de suscripción**, no de grupo de recursos: así avisa también de un recurso creado por error fuera del grupo.
-  - **1 €/mes:** la suscripción factura en euros. El nombre `presupuesto-mensual-1usd` es anterior a saberlo y no se puede cambiar.
-  - **Avisos a un correo personal además del universitario**, por si la cuenta universitaria se desactiva.
-- **Por qué:**
-  - Durante el primer año, el tope real es el crédito sin tarjeta; el presupuesto es un aviso temprano.
-  - Con pago por uso (segundo año), los presupuestos sí están soportados oficialmente y pasan a ser la protección principal. Conviene tenerlos funcionando y entendidos desde ya.
-  - Un presupuesto solo avisa cuando el gasto ya ha ocurrido (se evalúa cada ~24 h); por eso hacen falta también las capas de prevenir y limitar.
-- **Alternativas descartadas:**
-  - Fiarse de la documentación y renunciar al presupuesto: habría dejado sin aviso temprano algo que sí funciona.
-  - Fiarse del presupuesto como única protección: no evita el gasto, solo lo notifica.
+Estado: aceptada
 
-## D-011 · Políticas de Azure: la lista roja y la región como código
-- **Contexto:** el presupuesto y las alertas solo **avisan**, y lo hacen cuando el gasto ya ha ocurrido. El error más caro posible es crear sin querer un recurso con coste fijo por hora (un asistente del portal que añade extras, un tutorial copiado, una errata en Terraform).
-- **Decisión:** dos asignaciones de Azure Policy a nivel de suscripción, con efecto **Deny**:
-  - `solo-spain-central`: definición integrada *Allowed locations* (`e56962a6-4747-49cd-b67b-bf8b01975c4c`), con `spaincentral` como única región. Se creó en el portal, que le asignó como nombre interno el identificador `d2d47a34e2da53deb832e047`.
-  - `lista-roja-costes`: definición integrada *Not allowed resource types* (`6c112d4e-5bc7-47ae-a041-ea2d9dccd749`), con 15 tipos de recurso de la lista roja. Los parámetros están en `infra/politicas/lista-roja.parameters.json`. Se creó con la CLI.
-  - Cada una tiene un mensaje de no cumplimiento que remite a este documento.
-- **Tipos bloqueados:** máquinas virtuales y conjuntos de escalado, Databricks, Data Factory, pools dedicated y Spark de Synapse, capacidades de Fabric y Power BI Embedded, NAT Gateway, Private Endpoints, IP públicas, gateways de VPN, Azure Firewall, Cosmos DB y Managed HSM.
-- **Lo que no se bloquea a propósito:**
-  - `Microsoft.Web/serverFarms`: la Function de Flex Consumption lo necesita. El riesgo de un plan Premium o App Service se vigila en el `plan` de Terraform.
-  - `Microsoft.Synapse/workspaces` y `Microsoft.Sql/servers`: son las dos opciones de la fase 6.
-  - Defender for Cloud: es una configuración de la suscripción, no un recurso; queda como regla manual.
-- **Por qué:** convierte la lista roja de un documento que hay que recordar en una regla que Azure aplica aunque haya un error humano. Es gratis y reversible.
-- **Limitación:** **no garantiza gastar 0 €.** No cubre los costes por uso de los servicios permitidos (consultas de Synapse, ingesta de logs, transacciones de almacenamiento). Eso lo cubren las capas de limitar y detectar (D-010).
-- **Verificación:** con `az policy assignment show` se comprobó que los parámetros son los esperados y que el modo es `Default` (aplica y bloquea). La primera prueba de denegación real será en la fase 5.
-- **Lecciones:**
-  - El selector de tipos del portal solo muestra los tipos de los **proveedores de recursos registrados**. En una suscripción nueva, el desplegable sale vacío, pero la política funciona igual. Por eso la lista roja se asignó con la CLI y un fichero de parámetros.
-  - Desde octubre de 2025, Azure exige **MFA para crear, modificar o borrar** desde la CLI, Terraform o la API (fase 2 de la MFA obligatoria); leer no lo requiere. Si `az login` reutiliza una sesión sin MFA, las escrituras fallan con `RequestDisallowedByAzure`. La solución es iniciar sesión forzando la MFA:
-    ```powershell
-    az logout
-    az login --tenant "<ID_DEL_TENANT>" --scope "https://management.core.windows.net//.default" --claims-challenge "eyJhY2Nlc3NfdG9rZW4iOnsiYWNycyI6eyJlc3NlbnRpYWwiOnRydWUsInZhbHVlcyI6WyJwMSJdfX19"
-    ```
-  - Con `--params` de la CLI, un fichero se indica con `@` delante, y en PowerShell entre comillas: `--params "@fichero.json"`.
-- **Alternativas descartadas:**
-  - Solo documentar la lista roja: depende de acordarse.
-  - La definición *Exclude Usage Costs Resources*: bloquea categorías enteras (cómputo, almacenamiento…) e impediría el propio proyecto.
+### Contexto
+Quería una sola región para todo el proyecto. Pensaba en Spain Central, West Europe o North Europe, pero Azure for Students trae una política que solo permite 5 regiones, distintas para cada estudiante. En mi suscripción son Germany West Central, Norway East, Spain Central, Italy North y Switzerland North.
 
-## D-012 · Repositorio: monorrepo organizado por herramienta, y qué no se versiona
-- **Contexto:** el proyecto combina código Python (ingesta), Terraform y políticas (infraestructura), dbt (modelado) y documentación. El repositorio es público.
-- **Decisión:**
-  - **Un único repositorio** con una carpeta por herramienta: `ingesta/`, `infra/` (`politicas/` y `terraform/`), `dbt/`, `notebooks/` y `docs/`.
-  - `ingesta/` es la raíz de la Function: la lógica vive en un paquete Python testeable en local y `function_app.py` solo la llama.
-  - Las carpetas se crean cuando tienen contenido (Git no versiona carpetas vacías); la estructura prevista se documenta en el README.
-  - **Nunca se versionan:** secretos (`.env`, `local.settings.json`, `profiles.yml`, `*.tfvars`, certificados), el **estado y los planes de Terraform** (`*.tfstate`, `*.tfplan`), los datos (`/data/`, `*.parquet`, `*.duckdb`) y todo lo regenerable (`.venv/`, `.terraform/`, `target/`, checkpoints de Jupyter).
-  - **Sí se versionan:** `.terraform.lock.hcl` (fija las versiones de los proveedores) y plantillas sin valores (`.env.example`, `terraform.tfvars.example`).
-  - `.gitattributes` normaliza los finales de línea a LF (la Function y la CI corren en Linux).
-  - Los commits usan el correo *noreply* de GitHub.
-- **Por qué:**
-  - Las piezas cambian juntas: un campo nuevo en la fuente toca la ingesta, dbt y la documentación en el mismo commit.
-  - Separar por herramienta permite que cada workflow de CI se lance solo cuando cambia su carpeta (filtros `paths:`) y que el paquete de despliegue de la Function no incluya Terraform ni dbt.
-  - El historial de Git es permanente: un secreto subido y borrado después sigue accesible, y la única solución es rotarlo. Por eso se previene antes del commit, en capas: `.gitignore`, revisión con `git status --untracked-files=all` y `git check-ignore -v`, y el *push protection* de GitHub como última red.
-  - El estado de Terraform guarda en texto plano las claves y cadenas de conexión de los recursos.
-  - Los identificadores (tenant, suscripción) no son secretos, pero en la documentación pública se sustituyen por marcadores.
-- **Alternativas descartadas:**
-  - Un repositorio por componente: más sobrecarga sin ventaja para un proyecto de una persona.
-  - Ignorar por extensión (`*.json`, `*.csv`): excluiría los parámetros de las políticas y los seeds de dbt, que son código. Se ignora por ubicación (`/data/`) y solo por extensión los formatos que nunca son código.
-  - Crear ya todas las carpetas con `.gitkeep`: el repositorio mostraría carpetas vacías durante meses.
+### Decisión
+Spain Central. Comprobé con la CLI que tiene todo lo que necesito: Flex Consumption con Python 3.10–3.14, Synapse y Azure SQL. Además es la elección natural para datos españoles, y en precio la diferencia entre regiones es de céntimos al año.
+
+### Alternativas descartadas
+- West Europe y North Europe: no están permitidas en mi suscripción.
+- Germany West Central: tiene lo mismo, pero no aporta nada. La dejo como plan B.
+- Norway East, Italy North y Switzerland North: sin ventajas.
+
+### Consecuencias
+La fijé con una política propia (D-011) para que no se pueda crear nada en otra región.
+
+---
+
+## D-010 · Control de costes por capas
+
+Estado: aceptada
+
+### Contexto
+La documentación de Cost Management dice que Azure for Students no está soportado, pero Education Hub recomienda crear presupuestos. Las dos fuentes se contradecían, y el presupuesto era una de mis protecciones del primer día.
+
+### Decisión
+Lo comprobé en lugar de fiarme de ninguna: el presupuesto, sus alertas y la regla de anomalías se crean sin errores, y el análisis de costes funciona. Aun así, no dejo el control de costes en una sola pieza. Lo monto en tres capas: prevenir (políticas, D-011), limitar (crédito sin tarjeta, límites por servicio y formatos baratos) y detectar (presupuesto de 1 € al mes, alerta de anomalías y revisión semanal del crédito).
+
+### Alternativas descartadas
+- Fiarme de la documentación y no crear presupuesto: me quedaría sin aviso temprano.
+- Fiarme solo del presupuesto: avisa cuando el gasto ya ha ocurrido, pero no lo evita.
+
+### Consecuencias
+En la fase 5 tengo que comprobar que el presupuesto mide el consumo real y que llegan los correos. A partir del segundo año, con pago por uso, los presupuestos pasan a ser la protección principal, así que me interesa tenerlos ya funcionando y entendidos.
+
+---
+
+## D-011 · Políticas de Azure contra los recursos caros
+
+Estado: aceptada
+
+### Contexto
+Las alertas solo avisan, y cuando el gasto ya ha ocurrido. El error más caro sería crear sin querer un recurso con coste fijo por hora: un asistente del portal que añade extras, un tutorial copiado o una errata en Terraform.
+
+### Decisión
+Asigné dos políticas con efecto Deny a toda la suscripción. solo-spain-central solo permite crear recursos en esa región. lista-roja-costes bloquea 15 tipos de recurso caros: máquinas virtuales y conjuntos de escalado, Databricks, Data Factory, pools dedicated y Spark de Synapse, Fabric, Power BI Embedded, NAT Gateway, Private Endpoints, IP públicas, gateways de VPN, Azure Firewall, Cosmos DB y Managed HSM.
+
+### Alternativas descartadas
+- Solo documentar la lista roja: depende de que me acuerde.
+- La política Exclude Usage Costs Resources: bloquea categorías enteras e impediría el propio proyecto.
+
+### Consecuencias
+Azure aplica la lista roja aunque me equivoque, y es gratis y reversible. Pero no garantiza gastar 0 €: no cubre el coste por uso de lo que sí está permitido. Tampoco bloqueo los planes de App Service (los necesita la Function), ni los workspaces de Synapse ni los servidores SQL (son las opciones de la fase 6); esos riesgos los vigilo en el plan de Terraform. Aprendí dos cosas: el portal solo lista los tipos de los proveedores registrados, por eso asigné la lista roja con la CLI; y Azure exige MFA para crear o modificar recursos desde la CLI, Terraform o la API.
+
+---
+
+## D-012 · Repositorio: monorrepo por herramienta
+
+Estado: aceptada
+
+### Contexto
+El proyecto mezcla Python, Terraform, políticas, dbt y documentación, y el repositorio es público.
+
+### Decisión
+Un único repositorio con una carpeta por herramienta: ingesta/, infra/, dbt/, notebooks/ y docs/. Las piezas cambian juntas (un campo nuevo toca la ingesta, dbt y la documentación), así que van en el mismo commit, y cada workflow de CI se lanza solo cuando cambia su carpeta. Nunca versiono secretos, el estado de Terraform (guarda claves en texto plano), los datos ni lo que se puede regenerar. En el .gitignore excluyo por ubicación y no por extensión, porque un JSON puede ser un fichero de parámetros y un CSV un seed de dbt.
+
+### Alternativas descartadas
+- Un repositorio por componente: más sobrecarga para un proyecto de una persona.
+- Ignorar *.json o *.csv: excluiría ficheros que son código.
+- Crear ya todas las carpetas con .gitkeep: el repositorio mostraría carpetas vacías durante meses.
+
+### Consecuencias
+Un secreto subido sigue en el historial aunque lo borre, así que lo prevengo antes del commit: .gitignore, revisión con git status --untracked-files=all y el push protection de GitHub como última red. El .gitattributes normaliza los finales de línea a LF, porque la Function y la CI corren en Linux.
+
+---
 
 ## D-013 · Paquete de ingesta: layout plano y dependencias separadas
-- **Contexto:** la ingesta se ejecutará en local, en la CI (fase 8) y en una Azure Function (fase 5). Hace falta poder testearla sin red y que el paquete de despliegue lleve solo lo imprescindible.
-- **Decisión:**
-  - Paquete `carburantes_ingesta/` con **layout plano** dentro de `ingesta/`, al lado de `function_app.py`.
-  - Un módulo por responsabilidad: `cliente.py` (descarga con el adaptador TLS de D-007), `validacion.py`, `almacenamiento.py`, `ingesta.py` (orquesta) y `__main__.py` (`python -m carburantes_ingesta`). `__main__.py` y `function_app.py` solo llaman a la misma función `ejecutar()`.
-  - **La lógica, separada de la entrada/salida:** la sesión HTTP, el destino y la fecha se pasan como parámetros, para poder sustituirlos en los tests.
-  - `ingesta/requirements.txt`: solo lo que necesita la Function, con versión exacta (`requests==2.34.2`). En la fase 5 se añadirán `azure-functions` y el SDK de almacenamiento.
-  - `ingesta/requirements-dev.txt`: `-r requirements.txt` más `pytest==9.1.1`.
-  - Las dependencias de exploración (pandas, JupyterLab) van en `notebooks/requirements.txt`, fuera de `ingesta/`.
-  - pytest se configura en `ingesta/pyproject.toml`. Los tests que llaman a la API real llevan el marcador `integracion` y no se ejecutan por defecto.
-- **Por qué:**
-  - La Function despliega la carpeta tal cual: con layout plano, `function_app.py` importa el paquete sin instalarlo, y la estructura es la misma en local y en producción.
-  - Una sola función `ejecutar()` para local, CI y Azure: lo que se prueba es lo que se ejecuta.
-  - Menos dependencias en la Function: paquete más pequeño y arranque más rápido. La CI de la ingesta instala solo lo suyo.
-  - Versiones exactas: el despliegue es reproducible.
-  - **Regla:** todo lo que se importa directamente va en el fichero, aunque ya llegue como dependencia de otro paquete.
-- **Alternativas descartadas:**
-  - Layout `src/`: es el estándar para librerías que se instalan con pip; aquí obligaría a instalar el paquete en la Function sin aportar nada.
-  - Un único `requirements.txt`, o generarlo con `pip freeze`: metería pandas, JupyterLab y sus dependencias en la Function.
-- **Lección:** `pytest` no añade la carpeta actual a `sys.path` y `python -m pytest` sí. Con layout plano hace falta `pythonpath = ["."]` en la configuración para que los dos funcionen igual, también desde la raíz del repositorio (`pytest ingesta`).
+
+Estado: aceptada
+
+### Contexto
+La ingesta se va a ejecutar en local, en la CI y en una Azure Function. Necesito poder testearla sin red y que la Function cargue solo lo imprescindible.
+
+### Decisión
+Un paquete carburantes_ingesta/ con layout plano dentro de ingesta/, junto a function_app.py, con un módulo por responsabilidad: descarga, validación, almacenamiento y orquestación. La lógica no toca la red ni el disco directamente: la sesión HTTP, el destino y la fecha se pasan como parámetros, y en los tests los sustituyo. Las dependencias van separadas: requirements.txt solo con lo que necesita la Function y con versiones exactas, y requirements-dev.txt con eso más pytest. Pandas y JupyterLab se quedan en notebooks/.
+
+### Alternativas descartadas
+- Layout src/: es el estándar para librerías que se instalan con pip, pero aquí obligaría a instalar el paquete en la Function sin aportar nada.
+- Un único requirements.txt, o generarlo con pip freeze: metería pandas y JupyterLab en la Function.
+
+### Consecuencias
+El mismo código se ejecuta en local, en la CI y en Azure. Con layout plano tuve que añadir pythonpath = ["."] a la configuración de pytest, porque pytest no añade la carpeta actual al sys.path (python -m pytest sí).
+
+---
 
 ## D-014 · Validaciones de la ingesta en dos niveles
-- **Contexto:** el esquema de datos preveía que la ingesta validara cada día todos los precios y comparara el número de estaciones con el día anterior (±10 %). Dos problemas: un solo precio erróneo entre ~42.000 haría perder el día entero, y comparar con el día anterior obliga a la ingesta a leer el fichero previo (a tener estado).
-- **Decisión:**
-  - **Bloqueantes:** no se guarda nada y la ejecución falla con un error propio (`RespuestaInvalida`).
-    - La respuesta no es JSON.
-    - `ResultadoConsulta` es distinto de `OK`.
-    - Falta `ListaEESSPrecio` o está vacía.
-    - El número de estaciones está fuera de **10.000–13.000**.
-  - **Avisos:** se guarda el raw y se registra un warning.
-    - `IDEESS` duplicados.
-    - Precios no convertibles o fuera de rango.
-  - Los precios y los duplicados se tratan en curated (fase 6). La comparación con el día anterior también se aplaza a la fase 6.
-- **Por qué:**
-  - Raw es la copia de lo que dijo la fuente y sirve para reprocesar. Una respuesta rota no sirve ni para eso; una con algún dato raro, sí.
-  - Si la ejecución falla solo cuando la respuesta no es utilizable, un fallo significa algo (alerta, reintento).
-  - El rango absoluto (~±12 % sobre las 11.433 estaciones del 19/10/2026) detecta respuestas truncadas sin que la ingesta tenga estado.
-- **Alternativas descartadas:**
-  - Validar todo y rechazar el día si algo falla: se perdería histórico por un solo dato.
-  - No validar: se guardarían respuestas de error o truncadas sin avisar.
-  - Comparar ya con el día anterior: añade estado a la ingesta cuando todavía no hay histórico.
 
----
+Estado: aceptada
 
-## Plan de fin del crédito (segundo año)
-- **Fechas clave:** el crédito caduca el **18/11/2027** y solo se renueva mientras se mantenga la condición de estudiante. Si se agotan los 88 $ antes, pasa lo mismo, aunque con ~1–3 €/año no ocurrirá.
-- **Qué ocurre al caducar:** los recursos quedan inaccesibles y hay **90 días** para pasar a pago por uso; después se pierden.
-- **Desde ya (sin coste):**
-  - Toda la infraestructura en Terraform, para poder recrearla en cualquier suscripción en minutos.
-  - Avisos de costes también a un correo personal.
-- **Septiembre de 2027 — decidir:**
-  - **A. Pago por uso (~1–3 €/año).** Hay que añadir una tarjeta, lo que elimina el tope duro. Antes de hacerlo deben estar funcionando los presupuestos (oficialmente soportados con pago por uso) y las políticas. Si la cuenta universitaria ya no existe, sería una suscripción nueva: `terraform apply` y subir el histórico exportado.
-  - **B. Apagarlo.** Exportar los datos y hacer `terraform destroy`. El proyecto se mantiene como repositorio, documentación, Power BI en modo Import y capturas.
-  - **C. Plan B de D-003** (ingesta con GitHub Actions y otro almacenamiento gratuito).
-- **Octubre de 2027 — en cualquier caso:**
-  - **Exportar raw y curated** a local (menos de 1 GB por año) con `az storage blob download-batch`, **antes** del 18/11/2027.
-  - **Renovar la regla de anomalías**, que vence el 19/10/2027.
+### Contexto
+Había previsto validar en la ingesta todos los precios y comparar el número de estaciones con el del día anterior. Pero un solo precio mal entre 42.000 me haría perder el día entero, y comparar con el día anterior obliga a la ingesta a leer el fichero previo.
 
----
+### Decisión
+Separo dos niveles. Si la respuesta es inutilizable (no es JSON, ResultadoConsulta no es OK, la lista de estaciones falta o está vacía, o hay menos de 10.000 o más de 13.000 estaciones), no guardo nada y la ejecución falla con un error propio. Si es utilizable pero tiene datos raros (IDEESS duplicados, precios que no se pueden convertir o fuera de rango), la guardo en raw y registro un aviso. Esos datos se tratan en curated, en la fase 6, igual que la comparación con el día anterior.
 
-## Observaciones sobre los datos (para tratar en la transformación)
-- Sin cabecera `Accept: application/json`, el servicio responde en **XML** (con nombres de campo codificados, p. ej. `_x0025__x0020_BioEtanol` = `% BioEtanol`). Indicio de un servicio .NET.
-- La fecha de la cabecera coincide casi con la hora de la petición: puede que el servicio genere la foto en cada consulta en lugar de publicar una vez al día. Pendiente de confirmar.
-- Precios y coordenadas vienen como **texto con coma decimal** (`"1,459"`), no como números: el JSON los manda entre comillas.
-- Los precios que no existen vienen como **cadena vacía `""`**, no como nulo. Transformación: `""` → nulo, coma → punto, texto → número.
-- Exploración del 19/10/2026: **11.433 estaciones**, 41 columnas, sin `IDEESS` duplicados (sirve como clave de estación).
-- Cobertura por carburante: gasóleo A 98,2 %, gasolina 95 E5 95,2 %, gasóleo Premium 51,4 %, gasolina 98 E5 47,9 %, AdBlue 25,7 %, gasóleo B 19,8 %, diésel renovable 14,2 %. Amoniaco y metanol: 0 estaciones; hidrógeno: 2.
-- Media de **~3,7 carburantes por estación** → ~42.000 filas/día en formato largo (confirma D-004).
-- El **gasóleo B es agrícola** (otra fiscalidad, no apto para carretera): no se puede mezclar con el gasóleo A en medias. Hace falta clasificar los carburantes por uso.
-- Gasóleo A (19/10/2026): 11.222 precios, de 1,499 a 2,299 €/l, media 1,888 €/l, sin valores absurdos. Nivel de precios pendiente de contrastar con una fuente independiente.
-- **Fiscalidad territorial:** Melilla, Las Palmas, Ceuta y Santa Cruz de Tenerife son las zonas más baratas (10–25 cts/l por debajo de la península). Solo suman ~515 estaciones, así que no explican por sí solas la dispersión de precios (hipótesis pendiente: low-cost frente a grandes marcas). → La dimensión de estaciones necesita una **zona fiscal** (península y Baleares / Canarias / Ceuta y Melilla).
-- **Los nombres de provincia no sirven como clave** (`VALENCIA / VALÈNCIA`, `PALMAS (LAS)`): se usará `IDProvincia` como clave y el nombre solo como etiqueta.
-- **Los códigos se mantienen como texto** aunque parezcan números (`IDProvincia` = `"02"`, `C.P.` = `"02250"`): convertirlos a número perdería los ceros a la izquierda.
-- **`Rótulo` es texto libre:** 3.565 rótulos distintos para 11.433 estaciones. Los 30 rótulos más frecuentes (~7.000 estaciones) están limpios; en la cola aparecen marca + nombre de estación (`BP HOSTAL DE LA SELVA`, `GALP/3CAMINOS-VALENCIA`), razones sociales (`COMBUSTIBLES CALAHORRA S.L.`), cooperativas y low-cost que se declaran en el nombre. → En la transformación: clasificar rótulo → marca → grupo → tipo de operador (gran petrolera / low-cost / hipermercado / independiente) con reglas de palabra completa y una tabla de correspondencias (seed de dbt), midiendo el % de cobertura.
-- **MOEVE y CEPSA** conviven por el cambio de marca en curso: ejemplo real de cambio de atributo que justifica la **SCD tipo 2** en la dimensión de estaciones. Marca ≠ grupo (CAMPSA y PETRONOR pertenecen a Repsol).
-- Pregunta de análisis pendiente: ¿explican las low-cost la dispersión de precios dentro de la península?
-- `Tipo Venta` = `P` (venta al público) en todas las estaciones; `Margen` = lado de la carretera (D/I/N); `Remisión` = quién comunica el precio (OM/dm, pendiente de confirmar en la documentación).
+### Alternativas descartadas
+- Rechazar el día si algo falla: perdería histórico por un solo dato.
+- No validar: guardaría respuestas de error o truncadas sin enterarme.
+- Comparar ya con el día anterior: añade estado a la ingesta cuando aún no hay histórico.
 
-## Decisiones pendientes
-| Pendiente | Fase |
-|---|---|
-| Si el servicio genera la foto en cada petición, y hora de ejecución diaria de la ingesta | 4 · Script de ingesta |
-| Si hay endpoint histórico por fecha para hacer backfill | 4 · Script de ingesta |
-| Nivel de precios: contrastar con una fuente independiente (Boletín Petrolero de la UE o prensa) | 4 · Script de ingesta |
-| Mover las dependencias de exploración (pandas, JupyterLab) a `notebooks/requirements.txt` (D-013) | 4 · Script de ingesta |
-| Comprobar con un entorno virtual limpio que la ingesta funciona solo con `ingesta/requirements.txt` (D-013) | 4 · Script de ingesta |
-| Memoria mínima de instancia de Flex Consumption (afecta al coste). Python 3.13 ya confirmado en Spain Central (D-009) | 5 · Infraestructura con Terraform |
-| Medir la primera semana el coste real de la cuenta de almacenamiento interna de la Function; si es alto, aplicar el plan B (GitHub Actions) | 5 · Infraestructura con Terraform |
-| **Comprobar que Cost Management mide el consumo real** (comparar Análisis de costes con Education Hub la primera semana) y que llegan los correos de alerta (D-010) | 5 · Infraestructura con Terraform |
-| Iniciar sesión con MFA en la CLI antes de `terraform apply` (ver D-011, lecciones) | 5 · Infraestructura con Terraform |
-| Pasar las dos políticas a Terraform (importar las asignaciones existentes o recrearlas con nombre legible) y comprobar que rechazan un recurso fuera de la región o de la lista roja | 5 · Infraestructura con Terraform |
-| **Dónde guardar el estado de Terraform:** en local o en un backend remoto en Azure Storage (coste y protección del fichero). Nunca en el repositorio (D-012) | 5 · Infraestructura con Terraform |
-| Añadir `.funcignore` para que `tests/`, `pyproject.toml` y `requirements-dev.txt` no entren en el paquete de la Function (D-013) | 5 · Infraestructura con Terraform |
-| **Capa de consulta:** Synapse serverless sobre Parquet o Azure SQL Database con oferta gratuita (ambas disponibles en Spain Central; comprobar compatibilidad con la suscripción de estudiante y el consumo de vCore-segundos) | 6 · Zona curated |
-| Si se elige Synapse: límites mínimos permitidos en su control de costes, y comprobar que el bloqueo de `Microsoft.Synapse/workspaces/sqlPools` no impide crear el workspace serverless | 6 · Zona curated |
-| Validación de precios, tratamiento de `IDEESS` duplicados y comparación del número de estaciones con el día anterior (D-014) | 6 · Zona curated |
-| Adaptador de dbt según la capa elegida: `dbt-sqlserver` (Azure SQL), `dbt-synapse` (comprobar soporte de serverless) o `dbt-duckdb` sobre los Parquet de ADLS | 7 · Modelado con dbt |
-| Significado exacto de `Remisión` (OM / dm): confirmar en la documentación del Geoportal | 7 · Modelado con dbt |
-| Reglas concretas de clasificación de rótulos y lista de marcas | 7 · Modelado con dbt |
-| Si el fichero `.pbix` de Power BI se versiona (en modo Import lleva los datos dentro) | 9 · Power BI |
-| Plan de fin del crédito: decidir entre A, B o C, exportar los datos y renovar la regla de anomalías | Septiembre–octubre de 2027 |
+### Consecuencias
+Un fallo de la ingesta significa algo concreto y merece una alerta. El rango de 10.000 a 13.000 (unos ±12 % sobre las 11.433 estaciones actuales) habrá que revisarlo si el número de estaciones cambia mucho.
