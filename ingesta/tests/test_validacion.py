@@ -1,7 +1,8 @@
+import json
+
 import pytest
 
-from carburantes_ingesta.validacion import RespuestaInvalida, comprobar_resultado, comprobar_estaciones
-
+from carburantes_ingesta.validacion import MAX_ESTACIONES, RespuestaInvalida, comprobar_estaciones, comprobar_resultado, leer_respuesta
 
 def test_resultado_ok_no_lanza_error():
     # Si la función no lanza nada, el test pasa.
@@ -36,9 +37,25 @@ def test_pocas_estaciones_lanza_error():
     with pytest.raises(RespuestaInvalida):
         comprobar_estaciones({"ListaEESSPrecio": [{}] * 500})    
 
-from carburantes_ingesta.validacion import MAX_ESTACIONES
 
 def test_excesivas_estaciones_lanza_error():
    # Más estaciones de las normales: respuesta anómala (por ejemplo, duplicada).
     with pytest.raises(RespuestaInvalida):
         comprobar_estaciones({"ListaEESSPrecio": [{}] * (MAX_ESTACIONES + 1)}) 
+
+def test_respuesta_que_no_es_json_lanza_error():
+    # b"..." es un literal de bytes, como los que llegan del servidor.
+    with pytest.raises(RespuestaInvalida):
+        leer_respuesta(b"<html>Error 500</html>")
+
+
+def test_respuesta_valida_devuelve_diccionario():
+    # json.dumps() convierte el diccionario en texto JSON y .encode() lo pasa a bytes.
+    contenido = json.dumps({"ResultadoConsulta": "OK", "ListaEESSPrecio": [{}] * 11_000}).encode()
+    datos = leer_respuesta(contenido)
+    assert datos["ResultadoConsulta"] == "OK"
+
+def test_json_que_no_es_objeto_lanza_error():
+    # b"[]" es JSON válido (una lista vacía), pero no es un objeto.
+    with pytest.raises(RespuestaInvalida):
+        leer_respuesta(b"[]")
