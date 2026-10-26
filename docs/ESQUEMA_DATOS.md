@@ -10,10 +10,11 @@ Resultado de la fase de exploración (19/10/2026), con las validaciones de la in
 |---|---|
 | Servicio | Servicio REST de precios de carburantes (Ministerio para la Transición Ecológica / Geoportal de gasolineras) |
 | Endpoint | `https://sedeaplicaciones.minetur.gob.es/ServiciosRESTCarburantes/PreciosCarburantes/EstacionesTerrestres/` |
+| Histórico | `.../PreciosCarburantes/EstacionesTerrestresHist/dd-mm-aaaa`: una fecha por petición (sin rangos), con `Fecha` a las 0:00. Disponible al menos desde el 01/01/2020 (10.305 estaciones). Comprobado el 26/10/2026. |
 | Autenticación | Ninguna (datos públicos) |
 | Formato | JSON con la cabecera `Accept: application/json`; sin ella devuelve XML, con los nombres de campo codificados (`_x0025__x0020_BioEtanol` = `% BioEtanol`) |
 | Conexión | Requiere TLS 1.2 con cifrados RSA (ver D-007) |
-| Tamaño | ~14 MB por respuesta, en una sola línea |
+| Tamaño | ~14 MB por respuesta, en una sola línea (~0,7 MB comprimido con gzip) |
 | Volumen | 11.433 estaciones, 41 campos por estación |
 
 ### Estructura de la respuesta
@@ -128,7 +129,7 @@ Media de **~3,7 carburantes por estación**. Las unidades de los gases (por litr
   - El número de estaciones está fuera de 10.000–13.000.
 - **Avisos:** se guarda el raw y se registra un warning.
   - `IDEESS` duplicados.
-  - Precios no convertibles a número o fuera de un rango razonable.
+  - Precios no convertibles a número o fuera de 0,1–50 €. El rango es amplio a propósito: el hidrógeno llega a 25 €/kg.
 
 **En curated (fase 6):** conversión de precios (problema 1), tratamiento de `IDEESS` duplicados y comparación del número de estaciones con el día anterior (aviso si varía más de ±10 %).
 
@@ -137,7 +138,7 @@ Media de **~3,7 carburantes por estación**. Las unidades de los gases (por litr
 ## 4. Hallazgos para el análisis
 
 - **Fiscalidad territorial:** Melilla, Las Palmas, Ceuta y Santa Cruz de Tenerife son las zonas más baratas (10–25 cts/l menos que la península), pero solo suman ~515 estaciones. Hace falta una **zona fiscal**: península y Baleares / Canarias / Ceuta y Melilla.
-- **Gasóleo A (19/10/2026):** 11.222 precios, de 1,499 a 2,299 €/l, media 1,888 €/l, sin valores absurdos. Nivel pendiente de contrastar con una fuente externa.
+- **Gasóleo A (19/10/2026):** 11.222 precios, de 1,499 a 2,299 €/l, media 1,888 €/l, sin valores absurdos. Contrastado el 26/10/2026: el Boletín Petrolero de la UE daba 1,889 €/l para el 12/10/2026.
 - **Dispersión dentro de la península:** la fiscalidad no la explica por sí sola. Hipótesis: low-cost frente a grandes marcas.
 
 ---

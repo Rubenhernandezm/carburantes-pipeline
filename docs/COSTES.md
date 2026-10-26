@@ -10,7 +10,7 @@ El primer año lo cubre Azure for Students: 88 $ de crédito sin tarjeta, que ca
 |---|---|---|
 | Azure Functions, Flex Consumption (Python 3.13) | 1 ejecución diaria de unos 20 s | < 0,50 € |
 | Cuenta de almacenamiento interna de la Function | Estado y despliegue de la Function | Céntimos (a medir la primera semana) |
-| ADLS Gen2 (Hot, LRS) | 1–1,5 GB al cabo de un año | ~0,30 € |
+| ADLS Gen2 (Hot, LRS) | ~0,5 GB al año (~1 GB con el backfill desde 2025) | ~0,10–0,25 € |
 | Capa de consulta, opción A: Synapse serverless sobre Parquet | Consultas, dbt y Power BI | ~0,50–1 € |
 | Capa de consulta, opción B: Azure SQL Database, oferta gratuita | Datos modelados, dbt y Power BI en modo Import | 0 € |
 | Application Insights con límite diario | Logs de la Function | 0 € (cuota gratuita) |

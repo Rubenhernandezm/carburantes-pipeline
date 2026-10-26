@@ -18,7 +18,7 @@ Uso el servicio REST de precios de carburantes del Ministerio para la Transició
 - Datasets estáticos de Kaggle o el de taxis de Nueva York: no se actualizan, así que no hay histórico que construir.
 
 ### Consecuencias
-El valor del proyecto está en el histórico que voy acumulando. Si la ingesta falla un día, ese día se pierde, salvo que el servicio tenga un endpoint histórico (pendiente de comprobar).
+El valor del proyecto está en el histórico que voy acumulando. Si la ingesta falla un día, puedo recuperarlo con el endpoint histórico del servicio (EstacionesTerrestresHist), aunque ese histórico no lleva la misma hora de referencia que mis fotos (ver ESQUEMA_DATOS.md).
 
 ---
 
@@ -68,7 +68,7 @@ Estado: aceptada
 El JSON de un día ocupa unos 14 MB y la mayoría de los 23 campos de precio vienen vacíos. Synapse serverless cobra por datos leídos.
 
 ### Decisión
-Guardo dos copias. En raw, el JSON tal cual llega, comprimido con gzip (1–2 MB al día): es la copia de seguridad para poder reprocesar. En curated, Parquet en formato largo (una fila por estación, carburante y día: unas 42.000 filas y menos de 0,5 MB al día), particionado por fecha. Consultar Parquet particionado cuesta del orden de 100 veces menos que consultar el JSON.
+Guardo dos copias. En raw, el JSON tal cual llega, comprimido con gzip (unos 0,7 MB al día, medido el 26/10/2026): es la copia de seguridad para poder reprocesar. En curated, Parquet en formato largo (una fila por estación, carburante y día: unas 42.000 filas y menos de 0,5 MB al día), particionado por fecha. Consultar Parquet particionado cuesta del orden de 100 veces menos que consultar el JSON.
 
 ### Alternativas descartadas
 - Guardar solo el JSON: caro de consultar.
