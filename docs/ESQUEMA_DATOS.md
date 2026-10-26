@@ -27,7 +27,7 @@ Resultado de la fase de exploración (19/10/2026), con las validaciones de la in
 }
 ```
 
-- `Fecha`: fecha y hora de la foto, en formato `dd/mm/aaaa hh:mm:ss`. Parece coincidir con la hora de la petición (pendiente de confirmar).
+- `Fecha`: hora de la petición, en formato `dd/mm/aaaa hh:mm:ss`, en hora española y sin zona horaria. El servicio no publica una foto fija: cada consulta devuelve el estado del momento, y los datos cambian a lo largo del día (comprobado el 26/10/2026, ver D-015).
 - `ResultadoConsulta`: estado de la consulta. La ingesta debe comprobar que vale `OK` antes de guardar.
 - `ListaEESSPrecio`: lista de estaciones.
 
@@ -100,7 +100,7 @@ Todos con el nombre `Precio <carburante>`, coma decimal y `""` cuando la estaci�
 | Amoniaco | 0 % | Otros |
 | Metanol | 0 % | Otros |
 
-Media de **~3,7 carburantes por estación**. Las unidades de los gases (por litro o por kg) están **pendientes de confirmar**.
+Media de **~3,7 carburantes por estación**. Las unidades de los gases (por litro o por kg) están **pendientes de confirmar**. Pista: el 26/10/2026 una estación vendía hidrógeno a 25,000, lo que apunta a €/kg.
 
 ---
 
@@ -167,7 +167,6 @@ Se cerrará en la fase de modelado. Grano de la tabla de hechos: **una fila por 
 ## 6. Pendiente de explorar
 | Pendiente | Fase |
 |---|---|
-| Si el servicio genera la foto en cada petición o se publica a una hora fija | 4 · Script de ingesta |
 | Formatos de `Horario` | 6 · Zona curated |
 | `% BioEtanol` y `% Éster metílico` | 6 · Zona curated |
 | Unidades de los precios de gas e hidrógeno (€/litro o €/kg) | 6 · Zona curated |

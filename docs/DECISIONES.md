@@ -269,3 +269,23 @@ Separo dos niveles. Si la respuesta es inutilizable (no es JSON, ResultadoConsul
 
 ### Consecuencias
 Un fallo de la ingesta significa algo concreto y merece una alerta. El rango de 10.000 a 13.000 (unos ±12 % sobre las 11.433 estaciones actuales) habrá que revisarlo si el número de estaciones cambia mucho.
+
+---
+
+## D-015 · Hora de la ingesta: 10:00 UTC
+
+Estado: aceptada
+
+### Contexto
+El servicio no publica una foto al día: cada consulta devuelve el estado del momento. Lo comprobé el 26/10/2026 con tres descargas en 16 minutos. El campo Fecha coincidía siempre con la hora de la petición, y entre la segunda y la tercera los datos ya habían cambiado (una estación menos). Así que mi foto del día depende de la hora a la que ejecute la ingesta.
+
+### Decisión
+La ingesta se ejecuta todos los días a las 10:00 UTC (11:00 en invierno y 12:00 en verano, hora española). La programo en UTC porque es la hora que usa la Function por defecto, y así no me afectan los cambios de hora. A mediodía, la fecha UTC y la española son siempre la misma, así que la carpeta fecha= coincide con el día español. Además, si falla, me entero en horario laboral.
+
+### Alternativas descartadas
+- Programarla en hora española: obliga a configurar la zona horaria de la Function y a lidiar con los días del cambio de hora. Para un análisis diario, una hora de diferencia entre invierno y verano no importa.
+- Por la noche: cerca de la medianoche, la fecha UTC y la española pueden no coincidir, y un fallo no lo vería hasta el día siguiente.
+- Varias ingestas al día: multiplica el almacenamiento sin aportar nada a un análisis diario.
+
+### Consecuencias
+En el análisis, "el precio del día" significa "el precio a las 10:00 UTC". Si lanzo la ingesta a mano a otra hora, el fichero queda en raw con su hora en el nombre, y curated elegirá el más cercano a las 10:00 UTC.
