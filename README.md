@@ -42,7 +42,7 @@ docs/             Decisiones de diseño y diccionario de datos
 - [x] Exploración de los datos
 - [x] Suscripción de Azure y protecciones de coste
 - [x] Repositorio
-- [ ] Script de ingesta con validaciones y tests
+- [x] Script de ingesta con validaciones y tests
 - [ ] Infraestructura con Terraform
 - [ ] Zona curated y capa de consulta SQL
 - [ ] Modelado con dbt
