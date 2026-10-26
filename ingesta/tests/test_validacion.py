@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from carburantes_ingesta.validacion import MAX_ESTACIONES, RespuestaInvalida, comprobar_estaciones, comprobar_resultado, leer_respuesta
+from carburantes_ingesta.validacion import MAX_ESTACIONES, RespuestaInvalida, buscar_avisos, comprobar_estaciones, comprobar_resultado, leer_respuesta
 
 def test_resultado_ok_no_lanza_error():
     # Si la función no lanza nada, el test pasa.
@@ -59,3 +59,22 @@ def test_json_que_no_es_objeto_lanza_error():
     # b"[]" es JSON válido (una lista vacía), pero no es un objeto.
     with pytest.raises(RespuestaInvalida):
         leer_respuesta(b"[]")
+
+def test_sin_problemas_no_hay_avisos():
+    datos = {"ListaEESSPrecio": [{"IDEESS": "1", "Precio Gasoleo A": "1,459"}, {"IDEESS": "2", "Precio Gasoleo A": ""}]}
+    assert buscar_avisos(datos) == []
+
+
+def test_ideess_duplicado_genera_aviso():
+    datos = {"ListaEESSPrecio": [{"IDEESS": "1"}, {"IDEESS": "1"}]}
+    assert len(buscar_avisos(datos)) == 1
+
+
+def test_precio_no_convertible_genera_aviso():
+    datos = {"ListaEESSPrecio": [{"IDEESS": "1", "Precio Gasoleo A": "abc"}]}
+    assert len(buscar_avisos(datos)) == 1
+
+
+def test_precio_fuera_de_rango_genera_aviso():
+    datos = {"ListaEESSPrecio": [{"IDEESS": "1", "Precio Gasoleo A": "1459"}]}
+    assert len(buscar_avisos(datos)) == 1

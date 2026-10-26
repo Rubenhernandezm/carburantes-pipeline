@@ -44,3 +44,37 @@ def leer_respuesta(contenido: bytes) -> dict:
     comprobar_estaciones(datos)
     return datos
 
+# Rango amplio a propósito: solo busca valores absurdos (0, 1459…). El hidrógeno
+# llega a 25 €/kg (visto el 26/10/2026); el control fino por carburante va en curated (fase 6, D-014).
+PRECIO_MIN = 0.1
+PRECIO_MAX = 50.0
+
+
+def buscar_avisos(datos: dict) -> list[str]:
+    """Devuelve los problemas que no bloquean el guardado: IDEESS duplicados y precios raros."""
+    avisos = []
+    estaciones = datos["ListaEESSPrecio"]
+
+    ids = [estacion.get("IDEESS") for estacion in estaciones]
+    duplicados = len(ids) - len(set(ids))
+    if duplicados:
+        avisos.append(f"{duplicados} IDEESS duplicados")
+
+    raros = []
+    for estacion in estaciones:
+        for campo, valor in estacion.items():
+            # Solo los campos de precio; "" significa que la estación no vende ese carburante.
+            if not campo.startswith("Precio ") or valor == "":
+                continue
+            try:
+                precio = float(str(valor).replace(",", "."))
+            except ValueError:
+                raros.append(f"{estacion.get('IDEESS')} {campo}={valor!r}")
+                continue
+            if not PRECIO_MIN <= precio <= PRECIO_MAX:
+                raros.append(f"{estacion.get('IDEESS')} {campo}={valor!r}")
+    if raros:
+        # Un solo aviso con el total y unos ejemplos, para no llenar el log con miles de líneas.
+        avisos.append(f"{len(raros)} precios raros, por ejemplo: {raros[:3]}")
+
+    return avisos
