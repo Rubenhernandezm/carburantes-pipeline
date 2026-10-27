@@ -2,7 +2,7 @@
 
 Pipeline de datos que ingiere cada día los precios de las ~11.400 gasolineras de España desde el servicio público del Ministerio, construye un histórico propio en un data lake de Azure, lo modela con dbt y lo analiza en Power BI.
 
-> En construcción. Fase actual: repositorio y estructura.
+> En construcción. Fase actual: plataforma de Terraform.
 
 ## Arquitectura prevista
 
